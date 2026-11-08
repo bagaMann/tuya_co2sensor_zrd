@@ -33,8 +33,8 @@ BIN_PATH := ./bin
 MAKE_INCLUDES := ./make
 TOOLS_PATH := ./tools
 BOOT_FILE := $(OUT_PATH)/bootloader.bin
-VERSION_RELEASE := V$(shell awk -F " " '/APP_RELEASE/ {gsub("0x",""); printf "%.1f", $$3/10.0; exit}' $(SRC_PATH)/include/version_cfg.h)
-VERSION_BUILD := $(shell awk -F " " '/APP_BUILD/ {gsub("0x",""); printf "%02d", $$3; exit}' ./src/include/version_cfg.h)
+VERSION_RELEASE := V$(shell LC_ALL=C awk -F " " '/APP_RELEASE/ {gsub("0x",""); printf "%.1f", $$3/10.0; exit}' $(SRC_PATH)/include/version_cfg.h)
+VERSION_BUILD := $(shell LC_ALL=C awk -F " " '/APP_BUILD/ {gsub("0x",""); printf "%02d", $$3; exit}' ./src/include/version_cfg.h)
 ZCL_VERSION_FILE := $(shell git log -1 --format=%cd --date=format:%Y%m%d -- src | python3 -c 'import sys; print(",".join(chr(39) + c + chr(39) for c in sys.stdin.read().strip()))')
 BOOT_SIZE := $(shell test -f $(BOOT_FILE) && stat -c %s $(BOOT_FILE) || echo 0)
 
