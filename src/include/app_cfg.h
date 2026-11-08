@@ -196,6 +196,7 @@ extern "C" {
  */
 #define ZCL_GROUP_SUPPORT                           ON
 #define ZCL_SCENE_SUPPORT                           ON
+#define ZCL_ON_OFF_SUPPORT                          ON
 #define ZCL_OTA_SUPPORT                             ON
 #define ZCL_GP_SUPPORT                              ON
 #define ZCL_CO2_MEASUREMENT_SUPPORT                 ON

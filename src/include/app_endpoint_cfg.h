@@ -57,6 +57,11 @@ typedef struct {
     float   value;
     float   min;
     float   max;
+    uint8_t  controlEnabled;
+    uint16_t thresholdOn;
+    uint16_t thresholdOff;
+    uint8_t  repeatCount;
+    uint16_t repeatIntervalMs;
 } zcl_co2Attr_t;
 
 /**

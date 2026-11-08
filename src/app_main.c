@@ -116,6 +116,7 @@ void user_app_init(void)
 
     /* Register ZCL specific cluster information */
     zcl_register(APP_ENDPOINT1, APP_EP1_CB_CLUSTER_NUM, (zcl_specClusterInfo_t *)g_appEp1ClusterList);
+    co2_binding_init();
 
 #if ZCL_GP_SUPPORT
     /* Initialize GP */

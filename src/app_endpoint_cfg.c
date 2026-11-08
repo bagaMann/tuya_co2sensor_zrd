@@ -71,6 +71,9 @@ const uint16_t app_ep1_inClusterList[] = {
  *  @brief Definition for Outgoing cluster / Client Cluster
  */
 const uint16_t app_ep1_outClusterList[] = {
+#ifdef ZCL_ON_OFF
+    ZCL_CLUSTER_GEN_ON_OFF,
+#endif
 #ifdef ZCL_OTA
     ZCL_CLUSTER_OTA,
 #endif
@@ -196,6 +199,11 @@ const zclAttrInfo_t scene_attr1Tbl[] = {
 
 zcl_co2Attr_t g_zcl_co2Attrs = {
         .value = 0.001014,
+        .controlEnabled = 0,
+        .thresholdOn = 1000,
+        .thresholdOff = 800,
+        .repeatCount = 3,
+        .repeatIntervalMs = 1500,
 };
 
 
@@ -203,6 +211,11 @@ const zclAttrInfo_t co2_attrTbl[] = {
         { ZCL_CO2_MEASUREMENT_ATTRID_MEASUREDVALUE,     ZCL_SINGLE, RR, (uint8_t*)&g_zcl_co2Attrs.value             },
         { ZCL_CO2_MEASUREMENT_ATTRID_MINMEASUREDVALUE,  ZCL_SINGLE, R,  (uint8_t*)&g_zcl_co2Attrs.min               },
         { ZCL_CO2_MEASUREMENT_ATTRID_MAXMEASUREDVALUE,  ZCL_SINGLE, R,  (uint8_t*)&g_zcl_co2Attrs.max               },
+        { CO2_BIND_ATTR_ENABLED,                        ZCL_BOOLEAN, RW, (uint8_t*)&g_zcl_co2Attrs.controlEnabled  },
+        { CO2_BIND_ATTR_ON_THRESHOLD,                   ZCL_UINT16,  RW, (uint8_t*)&g_zcl_co2Attrs.thresholdOn     },
+        { CO2_BIND_ATTR_OFF_THRESHOLD,                  ZCL_UINT16,  RW, (uint8_t*)&g_zcl_co2Attrs.thresholdOff    },
+        { CO2_BIND_ATTR_REPEAT_COUNT,                   ZCL_UINT8,   RW, (uint8_t*)&g_zcl_co2Attrs.repeatCount     },
+        { CO2_BIND_ATTR_REPEAT_INTERVAL,                ZCL_UINT16,  RW, (uint8_t*)&g_zcl_co2Attrs.repeatIntervalMs},
 
         { ZCL_ATTRID_GLOBAL_CLUSTER_REVISION,           ZCL_UINT16, R,  (uint8_t*)&zcl_attr_global_clusterRevision  },
 };

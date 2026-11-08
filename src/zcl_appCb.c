@@ -201,6 +201,9 @@ static void app_zclWriteRspCmd(uint16_t clusterId, zclWriteRspCmd_t *pWriteRspCm
  * @return  None
  */
 static void app_zclWriteReqCmd(uint8_t endPoint, uint16_t clusterId, zclWriteCmd_t *pWriteReqCmd) {
+    if (endPoint == APP_ENDPOINT1 && clusterId == ZCL_CLUSTER_MS_CO2_MEASUREMENT) {
+        co2_binding_config_written();
+    }
 //    uint8_t numAttr = pWriteReqCmd->numAttr;
 //    zclWriteRec_t *attr = pWriteReqCmd->attrList;
 

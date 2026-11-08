@@ -16,6 +16,7 @@
 #include "app_endpoint_cfg.h"
 #include "app_uart.h"
 #include "app_co2sensor.h"
+#include "co2_binding.h"
 #include "app_bootloader.h"
 
 
