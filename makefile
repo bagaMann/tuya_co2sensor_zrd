@@ -4,7 +4,11 @@ PROJECT_NAME := tuya_co2sensor_zrd
 # Set the serial port number for downloading the firmware
 DOWNLOAD_PORT := COM3
 
+ifeq ($(OS),Windows_NT)
 COMPILE_PREFIX = C:/TelinkSDK/opt/tc32/bin/tc32
+else
+COMPILE_PREFIX = /opt/tc32/bin/tc32
+endif
 
 AS      = $(COMPILE_PREFIX)-elf-as
 CC      = $(COMPILE_PREFIX)-elf-gcc
@@ -36,8 +40,10 @@ BOOT_SIZE := $(shell ls -l $(BOOT_FILE) | awk '{print $$5}')
 
 
 TL_CHECK = $(TOOLS_PATH)/tl_check_fw.py
-MAKE_OTA = $(TOOLS_PATH)/make_ota.py
-MAKE_OTA_TUYA = $(TOOLS_PATH)/make_ota_tuya.py
+# Exact OTA packer from slacky1965/ts0201_tz3000_zed
+MAKE_OTA = $(TOOLS_PATH)/zigbee_ota.py
+TUYA_MANUF_CODE := 0x1141
+TUYA_IMAGE_TYPE := 0xd3a3
 
 INCLUDE_PATHS := \
 -I$(SDK_PATH)/platform \
@@ -79,13 +85,7 @@ GCC_FLAGS += \
 -DBUILD_DATE="{8,$(ZCL_VERSION_FILE)}"
 endif
   
- ifeq ($(CHECK_BL),1)
-VERSION_BUILD = 00
-GCC_FLAGS += \
--DCHECK_BOOTLOADER \
--DVERSION_BUILD \
--DAPP_BUILD=0x00
-endif
+ 
   
 GCC_FLAGS += \
 $(DEVICE_TYPE) \
@@ -195,17 +195,6 @@ $(LST_FILE): $(ELF_FILE)
 	@echo 'Finished building: $@'
 	@echo ' '
 	
-ifeq ($(CHECK_BL),1)
-$(BIN_FILE): $(ELF_FILE)
-	@echo 'Create Flash image (binary format)'
-	@$(OBJCOPY) -v -O binary $(ELF_FILE)  $(BIN_FILE)
-	@python3 $(TL_CHECK) $(BIN_FILE)
-	@echo 'Create zigbee Tuya OTA file'
-	@python3 $(MAKE_OTA_TUYA) -m 4417 -t 54179 -o $(BIN_PATH)/1141-d3a3-1111114b-tuya_co2sensor_zrd.zigbee $(BIN_FILE) $(BOOT_FILE)
-	@echo ' '
-	@echo 'Finished building: $@'
-	@echo ' '
-else
 $(BIN_FILE): $(ELF_FILE)
 	@echo 'Create Flash image (binary format)'
 	@$(OBJCOPY) -v -O binary $(ELF_FILE)  $(BIN_FILE)
@@ -213,11 +202,12 @@ $(BIN_FILE): $(ELF_FILE)
 	@cat $(BIN_FILE) $(BOOT_FILE) > $(FW_FILE)
 	@cp $(BIN_FILE) $(BIN_PATH)/$(PROJECT_NAME)_$(VERSION_RELEASE).$(VERSION_BUILD).bin
 	@echo 'Create zigbee OTA file'
-	@python3 $(MAKE_OTA) -ot $(PROJECT_NAME) $(BIN_PATH)/$(PROJECT_NAME)_$(VERSION_RELEASE).$(VERSION_BUILD).bin
+	@cp $(BIN_FILE) $(BIN_PATH)/$(PROJECT_NAME)_last_version.bin
+	@python3 $(MAKE_OTA) -t $(PROJECT_NAME) -s "Slacky-DIY OTA" $(BIN_PATH)/$(PROJECT_NAME)_$(VERSION_RELEASE).$(VERSION_BUILD).bin
+	@python3 $(MAKE_OTA) -t $(PROJECT_NAME) -m $(TUYA_MANUF_CODE) -i $(TUYA_IMAGE_TYPE) -v0x1111114b -s "Slacky-DIY OTA" $(BIN_PATH)/$(PROJECT_NAME)_$(VERSION_RELEASE).$(VERSION_BUILD).bin
 	@echo ' '
 	@echo 'Finished building: $@'
 	@echo ' '
-endif
 
 $(OBJ_DIR)/bin_updater.o: $(OBJ_DIR)
     @objcopy -I binary --output-target elf32-littlearm --rename-section .data=.bin_files ./updater.bin $@	 
