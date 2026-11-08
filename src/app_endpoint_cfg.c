@@ -43,9 +43,6 @@ const uint16_t app_ep1_inClusterList[] = {
 #ifdef ZCL_SCENE
     ZCL_CLUSTER_GEN_SCENES,
 #endif
-#ifdef ZCL_ON_OFF
-    ZCL_CLUSTER_GEN_ON_OFF,
-#endif
 #ifdef ZCL_ZLL_COMMISSIONING
     ZCL_CLUSTER_TOUCHLINK_COMMISSIONING,
 #endif
