@@ -1,76 +1,146 @@
 #include "app_main.h"
 
-/* Standard ZCL On/Off CLIENT commands over Zigbee binding. No server state. */
-#define CO2_PPM_MIN_VALID 350
-#define CO2_PPM_MAX_VALID 10000
+/*
+ * CO2 threshold On/Off CLIENT binding.
+ * Config persistence follows slacky1965/ts0201_tz3000_zed app_config.c:
+ * packed NV record, additive checksum, save/restore and default values.
+ * Cyclic repeat follows app_on_off.c (60 seconds, configurable on/off).
+ */
+#define CO2_PPM_MIN_VALID       350
+#define CO2_PPM_MAX_VALID     10000
+#define CO2_FAST_REPEATS_TOTAL  3
+#define CO2_FAST_REPEAT_MS   1500
+#define CO2_CYCLIC_REPEAT_MS (60 * 1000)
+
+/*
+ * Layout stays 9 bytes for compatibility with v1.0.05 NV records.
+ * Old byte 5 was repeat count (1..5), bytes 6..7 repeat interval.
+ * New byte 5 is cyclic repeat enable; bytes 6..7 are a format marker.
+ */
+#define CO2_CFG_FORMAT          0xC206
 
 typedef struct __attribute__((packed)) {
     uint8_t enabled;
     uint16_t onThreshold;
     uint16_t offThreshold;
-    uint8_t repeatCount;
-    uint16_t repeatIntervalMs;
+    uint8_t repeatEnabled;
+    uint16_t format;
     uint8_t crc;
 } co2_bind_nv_t;
 
-static co2_bind_nv_t accepted = {0, 1000, 800, 3, 1500, 0};
-static int8_t currentState = -1;
+static co2_bind_nv_t config = {0, 1000, 800, 0, CO2_CFG_FORMAT, 0};
+static int8_t currentState = -1;  /* -1 unknown, 0 off, 1 on */
 static int32_t lastPpm = 0;
 static bool haveSample = FALSE;
-static ev_timer_event_t *repeatTimer = NULL;
-static uint8_t repeatsLeft = 0;
-static uint8_t repeatCmd = ZCL_CMD_ONOFF_OFF;
+static ev_timer_event_t *fastTimer = NULL;
+static ev_timer_event_t *cyclicTimer = NULL;
+static uint8_t fastLeft = 0;
+static uint8_t fastCmd = ZCL_CMD_ONOFF_OFF;
 
-static uint8_t cfg_crc(const co2_bind_nv_t *cfg)
+static uint8_t checksum(const co2_bind_nv_t *cfg)
 {
-    uint8_t sum = 0;
-    const uint8_t *bytes = (const uint8_t *)cfg;
+    const uint8_t *data = (const uint8_t *)cfg;
+    uint8_t crc8 = 0;
     for (uint8_t i = 0; i < sizeof(co2_bind_nv_t) - 1; i++) {
-        sum += bytes[i];
+        crc8 += data[i];
     }
-    return sum;
+    return crc8;
 }
 
-static bool cfg_valid(const co2_bind_nv_t *cfg)
+static bool config_valid(const co2_bind_nv_t *cfg)
 {
-    return cfg->enabled <= 1 &&
-        cfg->offThreshold >= 400 && cfg->onThreshold <= 5000 &&
-        cfg->offThreshold < cfg->onThreshold &&
-        cfg->repeatCount >= 1 && cfg->repeatCount <= 5 &&
-        cfg->repeatIntervalMs >= 500 && cfg->repeatIntervalMs <= 10000;
+    return cfg->format == CO2_CFG_FORMAT &&
+           cfg->enabled <= 1 &&
+           cfg->repeatEnabled <= 1 &&
+           cfg->offThreshold >= 400 &&
+           cfg->onThreshold <= 5000 &&
+           cfg->offThreshold < cfg->onThreshold;
 }
 
-static void cfg_to_attrs(const co2_bind_nv_t *cfg)
+static void config_to_zcl(void)
 {
-    g_zcl_co2Attrs.controlEnabled = cfg->enabled;
-    g_zcl_co2Attrs.thresholdOn = cfg->onThreshold;
-    g_zcl_co2Attrs.thresholdOff = cfg->offThreshold;
-    g_zcl_co2Attrs.repeatCount = cfg->repeatCount;
-    g_zcl_co2Attrs.repeatIntervalMs = cfg->repeatIntervalMs;
+    g_zcl_co2Attrs.controlEnabled = config.enabled;
+    g_zcl_co2Attrs.thresholdOn = config.onThreshold;
+    g_zcl_co2Attrs.thresholdOff = config.offThreshold;
+    g_zcl_co2Attrs.repeatEnabled = config.repeatEnabled;
 }
 
-static co2_bind_nv_t cfg_from_attrs(void)
+/* Direct readback makes NV write failures diagnosable. */
+static nv_sts_t config_save(void)
 {
-    co2_bind_nv_t cfg = {0};
-    cfg.enabled = g_zcl_co2Attrs.controlEnabled;
-    cfg.onThreshold = g_zcl_co2Attrs.thresholdOn;
-    cfg.offThreshold = g_zcl_co2Attrs.thresholdOff;
-    cfg.repeatCount = g_zcl_co2Attrs.repeatCount;
-    cfg.repeatIntervalMs = g_zcl_co2Attrs.repeatIntervalMs;
-    cfg.crc = cfg_crc(&cfg);
-    return cfg;
-}
-
-static void stop_repeat(void)
-{
-    if (repeatTimer) {
-        TL_ZB_TIMER_CANCEL(&repeatTimer);
-        repeatTimer = NULL;
+#if NV_ENABLE
+    co2_bind_nv_t verify;
+    config.crc = checksum(&config);
+    nv_sts_t st = nv_flashWriteNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
+                                  sizeof(config), (uint8_t *)&config);
+    if (st == NV_SUCC) {
+        st = nv_flashReadNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
+                             sizeof(verify), (uint8_t *)&verify);
+        if (st == NV_SUCC && memcmp(&verify, &config, sizeof(config)) != 0) {
+            st = NV_CHECK_SUM_ERROR;
+        }
     }
-    repeatsLeft = 0;
+#if UART_PRINTF_MODE && DEBUG_SAVE
+    printf("CO2 config save: status=%d, on=%d, off=%d, enable=%d, repeat=%d\r\n",
+           st, config.onThreshold, config.offThreshold,
+           config.enabled, config.repeatEnabled);
+#endif
+    return st;
+#else
+    return NV_ENABLE_PROTECT_ERROR;
+#endif
 }
 
-/* Addressing follows slacky1965/ts0201_tz3000_zed src/app_on_off.c. */
+static void config_restore(void)
+{
+#if NV_ENABLE
+    co2_bind_nv_t saved;
+    nv_sts_t st = nv_flashReadNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
+                                  sizeof(saved), (uint8_t *)&saved);
+    if (st == NV_SUCC && saved.crc == checksum(&saved)) {
+        if (config_valid(&saved)) {
+            config = saved;
+        } else if (saved.format >= 500 && saved.format <= 10000 &&
+                   saved.repeatEnabled >= 1 && saved.repeatEnabled <= 5 &&
+                   saved.enabled <= 1 &&
+                   saved.offThreshold >= 400 && saved.onThreshold <= 5000 &&
+                   saved.offThreshold < saved.onThreshold) {
+            /* Preserve thresholds/settings written by firmware 1.0.05. */
+            config.enabled = saved.enabled;
+            config.onThreshold = saved.onThreshold;
+            config.offThreshold = saved.offThreshold;
+            config.repeatEnabled = 0; /* new cyclic feature is opt-in */
+            config.format = CO2_CFG_FORMAT;
+            config_save();
+        }
+    }
+#if UART_PRINTF_MODE && DEBUG_SAVE
+    printf("CO2 config restore: on=%d, off=%d, enable=%d, repeat=%d\r\n",
+           config.onThreshold, config.offThreshold,
+           config.enabled, config.repeatEnabled);
+#endif
+#endif
+    config_to_zcl();
+}
+
+static void stop_fast(void)
+{
+    if (fastTimer) {
+        TL_ZB_TIMER_CANCEL(&fastTimer);
+        fastTimer = NULL;
+    }
+    fastLeft = 0;
+}
+
+static void stop_cyclic(void)
+{
+    if (cyclicTimer) {
+        TL_ZB_TIMER_CANCEL(&cyclicTimer);
+        cyclicTimer = NULL;
+    }
+}
+
+/* Same APS binding table addressing as Slacky src/app_on_off.c. */
 static void send_to_bindings(uint8_t command)
 {
     if (!zb_isDeviceJoinedNwk()) return;
@@ -97,61 +167,79 @@ static void send_to_bindings(uint8_t command)
     }
 }
 
-static int32_t repeat_cb(void *arg)
+static int32_t fast_repeat_cb(void *arg)
 {
     (void)arg;
-    if (!accepted.enabled || !zb_isDeviceJoinedNwk() || !repeatsLeft) {
-        repeatTimer = NULL;
-        repeatsLeft = 0;
+    if (!config.enabled || !zb_isDeviceJoinedNwk() || fastLeft == 0) {
+        fastTimer = NULL;
+        fastLeft = 0;
         return -1;
     }
-    send_to_bindings(repeatCmd);
-    if (--repeatsLeft == 0) {
-        repeatTimer = NULL;
+    send_to_bindings(fastCmd);
+    if (--fastLeft == 0) {
+        fastTimer = NULL;
         return -1;
     }
-    return accepted.repeatIntervalMs;
+    return CO2_FAST_REPEAT_MS;
+}
+
+/* Slacky style: repeat last absolute On or Off every 60 seconds. */
+static int32_t cyclic_repeat_cb(void *arg)
+{
+    (void)arg;
+    if (!config.enabled || !config.repeatEnabled ||
+        !zb_isDeviceJoinedNwk() || currentState < 0) {
+        cyclicTimer = NULL;
+        return -1;
+    }
+    send_to_bindings(currentState ? ZCL_CMD_ONOFF_ON : ZCL_CMD_ONOFF_OFF);
+    return 0; /* keep original 60-second SDK timer period */
+}
+
+static void start_cyclic(void)
+{
+    stop_cyclic();
+    if (config.enabled && config.repeatEnabled && currentState >= 0 &&
+        zb_isDeviceJoinedNwk()) {
+        cyclicTimer = TL_ZB_TIMER_SCHEDULE(cyclic_repeat_cb, NULL, CO2_CYCLIC_REPEAT_MS);
+    }
 }
 
 static void set_state(uint8_t state)
 {
-    stop_repeat();
+    stop_fast();
     currentState = (int8_t)state;
-    repeatCmd = state ? ZCL_CMD_ONOFF_ON : ZCL_CMD_ONOFF_OFF;
-    send_to_bindings(repeatCmd);
-    if (accepted.repeatCount > 1) {
-        repeatsLeft = accepted.repeatCount - 1;
-        repeatTimer = TL_ZB_TIMER_SCHEDULE(repeat_cb, NULL, accepted.repeatIntervalMs);
-    }
+    fastCmd = state ? ZCL_CMD_ONOFF_ON : ZCL_CMD_ONOFF_OFF;
+    send_to_bindings(fastCmd);
+
+    /* Existing working 3-command burst remains fixed and unchanged. */
+    fastLeft = CO2_FAST_REPEATS_TOTAL - 1;
+    fastTimer = TL_ZB_TIMER_SCHEDULE(fast_repeat_cb, NULL, CO2_FAST_REPEAT_MS);
+    start_cyclic();
 }
 
 static void evaluate_sample(void)
 {
-    if (!accepted.enabled || !haveSample) return;
+    if (!config.enabled || !haveSample) return;
     if (!zb_isDeviceJoinedNwk()) {
         currentState = -1;
-        stop_repeat();
+        stop_fast();
+        stop_cyclic();
         return;
     }
     if (currentState < 0) {
-        if (lastPpm >= accepted.onThreshold) set_state(1);
-        else if (lastPpm <= accepted.offThreshold) set_state(0);
-    } else if (currentState == 0 && lastPpm >= accepted.onThreshold) {
+        if (lastPpm >= config.onThreshold) set_state(1);
+        else if (lastPpm <= config.offThreshold) set_state(0);
+    } else if (currentState == 0 && lastPpm >= config.onThreshold) {
         set_state(1);
-    } else if (currentState == 1 && lastPpm <= accepted.offThreshold) {
+    } else if (currentState == 1 && lastPpm <= config.offThreshold) {
         set_state(0);
     }
 }
 
 void co2_binding_init(void)
 {
-    co2_bind_nv_t saved;
-    if (nv_flashReadNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
-            sizeof(saved), (uint8_t *)&saved) == NV_SUCC &&
-            saved.crc == cfg_crc(&saved) && cfg_valid(&saved)) {
-        accepted = saved;
-    }
-    cfg_to_attrs(&accepted);
+    config_restore();
 }
 
 void co2_binding_on_sample(int32_t ppm)
@@ -162,23 +250,41 @@ void co2_binding_on_sample(int32_t ppm)
     evaluate_sample();
 }
 
-/* Called from standard ZCL write callback after attributes were updated. */
 void co2_binding_config_written(void)
 {
-    co2_bind_nv_t next = cfg_from_attrs();
-    if (!cfg_valid(&next)) {
-        cfg_to_attrs(&accepted);
+    co2_bind_nv_t next = config;
+    next.enabled = g_zcl_co2Attrs.controlEnabled;
+    next.onThreshold = g_zcl_co2Attrs.thresholdOn;
+    next.offThreshold = g_zcl_co2Attrs.thresholdOff;
+    next.repeatEnabled = g_zcl_co2Attrs.repeatEnabled;
+    next.format = CO2_CFG_FORMAT;
+
+    if (!config_valid(&next)) {
+        config_to_zcl();
         return;
     }
-    if (memcmp(&next, &accepted, sizeof(next)) == 0) return;
 
-    bool resetState = (next.enabled != accepted.enabled ||
-                       next.onThreshold != accepted.onThreshold ||
-                       next.offThreshold != accepted.offThreshold);
-    accepted = next;
-    nv_flashWriteNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
-            sizeof(accepted), (uint8_t *)&accepted);
-    stop_repeat();
-    if (resetState) currentState = -1;
-    evaluate_sample();
+    /* Compare only configuration fields (CRC is calculated in config_save). */
+    if (next.enabled == config.enabled &&
+        next.onThreshold == config.onThreshold &&
+        next.offThreshold == config.offThreshold &&
+        next.repeatEnabled == config.repeatEnabled) return;
+
+    bool resetState = (next.enabled != config.enabled ||
+                       next.onThreshold != config.onThreshold ||
+                       next.offThreshold != config.offThreshold);
+    bool repeatChanged = next.repeatEnabled != config.repeatEnabled;
+
+    config = next;
+    config_save();
+    config_to_zcl();
+
+    if (resetState) {
+        stop_fast();
+        stop_cyclic();
+        currentState = -1;
+        evaluate_sample();
+    } else if (repeatChanged) {
+        start_cyclic();
+    }
 }

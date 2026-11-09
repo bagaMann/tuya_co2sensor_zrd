@@ -199,8 +199,7 @@ zcl_co2Attr_t g_zcl_co2Attrs = {
         .controlEnabled = 0,
         .thresholdOn = 1000,
         .thresholdOff = 800,
-        .repeatCount = 3,
-        .repeatIntervalMs = 1500,
+        .repeatEnabled = 0,
 };
 
 
@@ -211,8 +210,7 @@ const zclAttrInfo_t co2_attrTbl[] = {
         { CO2_BIND_ATTR_ENABLED,                        ZCL_BOOLEAN, RW, (uint8_t*)&g_zcl_co2Attrs.controlEnabled  },
         { CO2_BIND_ATTR_ON_THRESHOLD,                   ZCL_UINT16,  RW, (uint8_t*)&g_zcl_co2Attrs.thresholdOn     },
         { CO2_BIND_ATTR_OFF_THRESHOLD,                  ZCL_UINT16,  RW, (uint8_t*)&g_zcl_co2Attrs.thresholdOff    },
-        { CO2_BIND_ATTR_REPEAT_COUNT,                   ZCL_UINT8,   RW, (uint8_t*)&g_zcl_co2Attrs.repeatCount     },
-        { CO2_BIND_ATTR_REPEAT_INTERVAL,                ZCL_UINT16,  RW, (uint8_t*)&g_zcl_co2Attrs.repeatIntervalMs},
+        { CO2_BIND_ATTR_REPEAT_ENABLED,                 ZCL_BOOLEAN, RW, (uint8_t*)&g_zcl_co2Attrs.repeatEnabled   },
 
         { ZCL_ATTRID_GLOBAL_CLUSTER_REVISION,           ZCL_UINT16, R,  (uint8_t*)&zcl_attr_global_clusterRevision  },
 };

@@ -60,8 +60,7 @@ typedef struct {
     uint8_t  controlEnabled;
     uint16_t thresholdOn;
     uint16_t thresholdOff;
-    uint8_t  repeatCount;
-    uint16_t repeatIntervalMs;
+    uint8_t  repeatEnabled;
 } zcl_co2Attr_t;
 
 /**
