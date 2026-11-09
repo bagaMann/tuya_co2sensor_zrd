@@ -37,7 +37,7 @@ static ev_timer_event_t *cyclicTimer = NULL;
 static uint8_t fastLeft = 0;
 static uint8_t fastCmd = ZCL_CMD_ONOFF_OFF;
 
-static uint8_t checksum(const co2_bind_nv_t *cfg)
+static uint8_t co2_config_checksum(const co2_bind_nv_t *cfg)
 {
     const uint8_t *data = (const uint8_t *)cfg;
     uint8_t crc8 = 0;
@@ -70,7 +70,7 @@ static nv_sts_t config_save(void)
 {
 #if NV_ENABLE
     co2_bind_nv_t verify;
-    config.crc = checksum(&config);
+    config.crc = co2_config_checksum(&config);
     nv_sts_t st = nv_flashWriteNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
                                   sizeof(config), (uint8_t *)&config);
     if (st == NV_SUCC) {
@@ -97,7 +97,7 @@ static void config_restore(void)
     co2_bind_nv_t saved;
     nv_sts_t st = nv_flashReadNew(1, NV_MODULE_APP, NV_ITEM_APP_USER_CFG,
                                   sizeof(saved), (uint8_t *)&saved);
-    if (st == NV_SUCC && saved.crc == checksum(&saved)) {
+    if (st == NV_SUCC && saved.crc == co2_config_checksum(&saved)) {
         if (config_valid(&saved)) {
             config = saved;
         } else if (saved.format >= 500 && saved.format <= 10000 &&
